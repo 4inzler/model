@@ -1,0 +1,126 @@
+Metadata-Version: 2.4
+Name: sel-bot
+Version: 0.2.0
+Summary: SEL: Systematic Emotional Logic – MoE bot with memory, Discord client, VC TTS/STT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: discord.py>=2.3.2
+Requires-Dist: transformers>=4.44.0
+Requires-Dist: accelerate>=0.33.0
+Requires-Dist: numpy>=1.26
+Requires-Dist: faster-whisper>=1.0.0
+Requires-Dist: piper-tts>=1.2.0
+Requires-Dist: bitsandbytes>=0.44.1
+
+# SEL Bot
+
+Mixture-of-experts assistants (general + coder models) with optional enhanced personas, CLI mode, and Discord bots. This repo also contains experimental side projects (`AIWaifu`, `Echo-Luna`), but the SEL tooling lives at the repo root.
+
+## Components
+- `sel.py` – baseline CLI brain (`uv run sel-cli`)
+- `sel_enhanced.py` – richer hormones/memory system (`uv run sel-enhanced`)
+- `sel_discord.py` – lightweight Discord client
+- `sel_discord_enhanced.py` – Discord + enhanced brain, web crawl, memes, TTS/STT
+- `audio_utils.py` – Piper TTS + faster-whisper glue
+- `scripts/fix_env.sh` – converts host model paths in `.env` to container paths
+
+## Requirements
+- Python 3.11 and [uv](https://docs.astral.sh/uv/)
+- Local GGUF/HF models on disk:
+  - `SEL_GENERAL_MODEL` – general chat model directory
+  - `SEL_CODER_MODEL` – coder model directory
+  - Optional `PIPER_MODEL` – Piper `.onnx` voice for TTS
+- `ffmpeg` (already installed in Dockerfile) for Discord voice features
+
+## Setup
+```bash
+uv venv
+uv sync          # installs deps declared in pyproject.toml
+cp .env.example .env
+```
+
+Edit `.env` and point the model variables at absolute host paths. When targeting Docker, run:
+```bash
+bash scripts/fix_env.sh /absolute/path/to/models
+```
+This rewrites `.env` so that container paths line up with your host volume mounts.
+
+## Running Locally (uv)
+```bash
+# CLI baseline
+uv run sel-cli              # or: uv run python sel.py
+
+# CLI enhanced persona
+uv run sel-enhanced         # or: uv run python sel_enhanced.py
+
+# Discord (requires DISCORD_TOKEN + intents)
+uv run sel-discord          # or: uv run python sel_discord.py
+uv run sel-discord-enhanced # or: uv run python sel_discord_enhanced.py
+```
+
+Tips
+- Set `SEL_GENERAL_MODEL`, `SEL_CODER_MODEL`, and `PIPER_MODEL` in `.env`.
+- `SEL_SINGLE_BACKEND=1` swaps models (lower VRAM). `SEL_QUANT=4bit` for 4-bit quantization.
+- `SEL_STREAM=1` enables token streaming in Discord replies.
+
+## Docker Workflow
+Build once:
+```bash
+docker build -t sel-bot:latest .
+```
+
+### CLI inside Docker
+```bash
+GENERAL=/abs/path/to/general_model
+CODER=/abs/path/to/coder_model
+PIPER=/abs/path/to/piper/model.onnx   # optional
+
+docker run --rm -it --gpus all \
+  --env-file .env \
+  -v "$GENERAL":/models/general:ro \
+  -v "$CODER":/models/coder:ro \
+  -e SEL_GENERAL_MODEL=/models/general \
+  -e SEL_CODER_MODEL=/models/coder \
+  sel-bot:latest sel-cli
+```
+Add the Piper mount/env if you want TTS.
+
+### Discord inside Docker
+Discord bots run headless; keep DNS working (`--network host` on Linux is simplest):
+```bash
+docker run -d --name sel-discord --gpus all \
+  --network host \
+  --env-file .env \
+  -v "$GENERAL":/models/general:ro \
+  -v "$CODER":/models/coder:ro \
+  -e SEL_GENERAL_MODEL=/models/general \
+  -e SEL_CODER_MODEL=/models/coder \
+  sel-bot:latest sel-discord
+```
+Check logs with `docker logs -f sel-discord`. Enhanced flavor: replace `sel-discord` with `sel-discord-enhanced`.
+
+If your `.env` already stores host paths, mount them at the same absolute path inside the container using `--mount type=bind,src="$SEL_GENERAL_MODEL",dst="$SEL_GENERAL_MODEL"`.
+
+## Tests, Format, Lint
+```bash
+uv run ruff format
+uv run ruff check --fix
+uv run pytest tests -q
+```
+
+## Building Artifacts
+```bash
+uv build                 # wheel + sdist in dist/
+uv pip install dist/*.whl
+```
+Container creation (`docker build -t sel-bot:latest .`) also gives you a runnable image with the CLI entrypoint.
+
+## Utilities
+- `scripts/fix_env.sh` – auto-maps host model directories to container paths.
+- `cleanup_memory.py` – trims noisy memory entries (`uv run python cleanup_memory.py`).
+- `sel_memory.json` / `sel_state.json` – runtime data files; keep them alongside the scripts.
+
+## Troubleshooting
+- Missing model warnings mean the container cannot see your mounted directories. Ensure the env var path matches the `-v` target.
+- Discord DNS errors usually vanish with `--network host` or explicit `--dns 1.1.1.1 --dns 8.8.8.8`.
+- Piper/ffmpeg must be on `PATH` for TTS playback; install them natively or inside the container.

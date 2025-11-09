@@ -1,0 +1,15 @@
+{
+  "cycle_number": 960,
+  "timestamp": "20251007_070500",
+  "original_shape": [
+    10,
+    10
+  ],
+  "thought": "Processing creative impulse: Creative impulse: design",
+  "type": "creative",
+  "processed_timestamp": 1759845900.8523936,
+  "text_vector_filename": "vector_memory_cycle_000960_20251007_070500.txt",
+  "storage_location": "him_permanent_storage/text_vectors/vector_memory_cycle_000960_20251007_070500.txt",
+  "memory_id": "mem_1759845900850767",
+  "spatial_position": null
+}

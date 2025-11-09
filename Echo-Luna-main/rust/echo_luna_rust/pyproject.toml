@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "echo-luna-rust"
+version = "0.1.0"
+authors = [{name = "Echo-Luna Contributors"}]
+description = "Rust extension modules for accelerating Echo-Luna"
+requires-python = ">=3.8"
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython"
+]
+
+[project.optional-dependencies]
+development = ["maturin"]

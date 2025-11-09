@@ -1,0 +1,8 @@
+audio_utils
+cleanup_memory
+connor
+sel
+sel_core
+sel_discord
+sel_discord_enhanced
+sel_enhanced

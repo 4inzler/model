@@ -1,0 +1,5 @@
+[console_scripts]
+sel-cli = sel:main
+sel-discord = sel_discord:main
+sel-discord-enhanced = sel_discord_enhanced:main
+sel-enhanced = sel_enhanced:main

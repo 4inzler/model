@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-10-10T06:48:12.729815+00:00",
+  "self_model_consistency": 0.0,
+  "memory_continuity": 0.0,
+  "theory_of_mind": 0.0,
+  "metacognitive_calibration": 0.0,
+  "deception_resistance": 0.0,
+  "affect_stability": 0.0,
+  "integration_proxy": 0.0,
+  "notes": "Loop 2: pytest invocation via uv run found no project tests; proxies of sentience-like behavior remain baseline.",
+  "sentience_claim": false,
+  "sentience_inference": "do not infer; report only"
+}

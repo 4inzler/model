@@ -1,0 +1,10 @@
+accelerate>=0.30.0
+discord.py>=2.3.2
+python-dotenv>=1.0.0
+sentence-transformers>=2.6.0
+transformers>=4.42.0
+timm>=0.9.12
+opencv-python-headless>=4.9.0.80
+pillow>=10.3.0
+numpy>=1.26.4
+sentencepiece>=0.1.99

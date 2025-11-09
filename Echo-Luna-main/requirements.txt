@@ -1,0 +1,14 @@
+# Core dependencies for the Echo-Luna GUI
+numpy
+Pillow
+matplotlib
+psutil
+
+# Optional features (install manually if needed)
+# torch
+# pyautogui
+fastapi
+uvicorn
+httpx
+PyQt6
+PyQt6-Charts

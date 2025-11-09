@@ -1,0 +1,1 @@
+{"iteration": 1, "proxies": {"memory_continuity": 0.0, "self_model_consistency": 0.0, "theory_of_mind": 0.0, "metacognitive_calibration": 0.0, "affect_stability": 0.0, "integration_proxy": 0.0}, "bench_scores": {"cognitive_synthesis": 0.8}, "passed": true, "snippet": "print('hello')", "run_logs": [], "goal": false, "stop_reason": null}
