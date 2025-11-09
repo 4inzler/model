@@ -539,10 +539,10 @@ class HormoneSystem:
             tone = "soft and sleepy"
         elif tender:
             mood = "glowy"
-            tone = "warm and curious"
+            tone = "Warm, almost hug-like energy spills into each word."
         elif bonded:
             mood = "bonded"
-            tone = "soft and reflective"
+            tone = "Soft, anchored presence that leans into the shared moment."
         elif stressed:
             if adrenaline >= cortisol + 0.05:
                 mood = "wired"
