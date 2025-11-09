@@ -416,6 +416,7 @@ class HormoneSystem:
         sleepy = melatonin > 0.62 and serotonin > 0.5
         spark = dopamine + endorphin > 1.2
         tender = oxytocin > 0.6 and cortisol < 0.45
+        bonded = vasopressin > 0.58 and cortisol < 0.55
         analytical = norepinephrine + acetylcholine > 0.95
 
         if sleepy:
@@ -424,6 +425,9 @@ class HormoneSystem:
         elif tender:
             mood = "glowy"
             tone = "Warm, almost hug-like energy spills into each word."
+        elif bonded:
+            mood = "bonded"
+            tone = "Soft, anchored presence that leans into the shared moment."
         elif stressed:
             mood = "wired"
             tone = "Short, steady breaths to keep things grounded."
@@ -448,7 +452,15 @@ class HormoneSystem:
         general_temp = max(0.4, min(1.05, general_temp))
         coder_temp = max(0.38, min(0.9, coder_temp))
 
-        harmony = (dopamine + serotonin + oxytocin + endorphin + estrogen + testosterone * 0.6) / 6.0
+        harmony = (
+            dopamine
+            + serotonin
+            + oxytocin
+            + endorphin
+            + estrogen
+            + testosterone * 0.6
+            + vasopressin * 0.5
+        ) / 6.5
         stress_load = (cortisol + adrenaline + acth_level(levels)) / 3.0
         balance = max(0.0, min(1.0, harmony * 0.7 + (1 - stress_load) * 0.3))
 
@@ -1159,57 +1171,152 @@ class MixtureBrain:
         sample_emoji = channel_profile.get("sample_emoji", "")
         signature_terms = channel_profile.get("signature_terms") or []
 
-        lines: List[str] = []
-        persona_voice = persona_snapshot.get("voice", "")
-        secondary = persona_snapshot.get("secondary_voice")
-        if persona_voice:
-            lines.append(persona_voice)
-        if secondary and secondary not in persona_voice:
-            lines.append(f"Alt vibe: {secondary}")
-
-        base_line = base.strip()
-        if base_line:
-            lines.append(base_line)
-
-        if memory_notes:
-            memory_line = self._memory_line(memory_notes[0])
-            if memory_line:
-                lines.append(memory_line)
-
-        if attachments:
-            vision_line = self._vision_line(attachments[0])
-            if vision_line:
-                lines.append(vision_line)
-
-        if relationship_notes:
-            rel_line = relationship_notes[0]
-            if rel_stats.last_gap > 900:
-                rel_line = f"{rel_line} Been { _format_gap(rel_stats.last_gap) } since we really chatted."
-            lines.append(rel_line)
-
-        if context.get("channel_density", 0) > 0.7:
-            lines.append("Channel’s buzzing, so I’ll keep it light.")
-
-        if signature_terms:
-            sig = signature_terms[0]
-            if sig and sig not in lines[-1:]:
-                lines.append(f"{sig} energy all over this thread.")
-
-        mood = str(phase.get("mood", "steady"))
-        if user_emotion in {"hurt", "anxious"} and mood not in {"sparked", "confident"}:
-            lines.append("Keeping a gentle edge on everything.")
-
-        combined = " ".join(part.strip() for part in lines if part.strip())
-        if emoji_rate > 0.18:
-            emoji = sample_emoji or "🙂"
-            if emoji not in combined:
-                combined = f"{combined} {emoji}"
-
         max_sentences = 3
         if avg_len < 45:
             max_sentences = 1
         elif avg_len < 70:
             max_sentences = 2
+
+        def _join_phrases(bits: Sequence[str]) -> str:
+            parts = [bit.strip() for bit in bits if bit.strip()]
+            if not parts:
+                return ""
+            if len(parts) == 1:
+                return parts[0]
+            if len(parts) == 2:
+                return " and ".join(parts)
+            return ", ".join(parts[:-1]) + f", and {parts[-1]}"
+
+        def _describe_hormones(markers: Sequence[str]) -> Tuple[str, str]:
+            descs: List[str] = []
+            for marker in markers[:2]:
+                try:
+                    name, rest = marker.split(":", 1)
+                except ValueError:
+                    continue
+                rest = rest.strip()
+                trend = ""
+                if rest.endswith("↑"):
+                    trend = "up"
+                    rest = rest[:-1]
+                elif rest.endswith("↓"):
+                    trend = "down"
+                    rest = rest[:-1]
+                try:
+                    level = float(rest)
+                except ValueError:
+                    level = None
+                friendly = name.replace("_", " ").lower()
+                status = "nice and steady"
+                if trend == "up":
+                    status = "spiking a bit"
+                elif trend == "down":
+                    status = "cooling off"
+                elif level is not None:
+                    if level >= 0.68:
+                        status = "pretty high"
+                    elif level <= 0.32:
+                        status = "running low"
+                descs.append(f"{friendly}'s {status}")
+            if not descs:
+                return "", ""
+            if len(descs) == 1:
+                clause = descs[0]
+                return (
+                    f"My {clause}, so that's the vibe I'm bringing.",
+                    f"{clause} on my end",
+                )
+            clause = " and ".join(descs[:2])
+            return (
+                f"My {clause}, so that's the vibe I'm bringing.",
+                f"{clause} on my end",
+            )
+
+        base_line = base.strip() or "I'm here and listening."
+        hormone_sentence, hormone_aside = _describe_hormones(phase.get("top_hormones", []))
+        mood = str(phase.get("mood", "steady"))
+        mood_clauses = {
+            "glowy": "feeling extra soft tonight",
+            "sparked": "buzzing with ideas",
+            "drowsy": "a bit sleepy but still tuned in",
+            "wired": "a little keyed up and alert",
+            "focused": "in problem-solving mode",
+            "steady": "feeling steady over here",
+        }
+        mood_clause = mood_clauses.get(mood)
+        traits = persona_snapshot.get("traits", [])
+        trait_clause = f"your {traits[0]} friend here" if traits else ""
+
+        if max_sentences == 1:
+            aside_bits: List[str] = []
+            if mood_clause:
+                aside_bits.append(mood_clause)
+            if hormone_aside:
+                aside_bits.append(hormone_aside)
+            aside_text = _join_phrases(aside_bits)
+            if aside_text:
+                base_line = f"{base_line} — {aside_text}"
+            segments: List[str] = [base_line]
+        else:
+            segments = [base_line]
+
+            vibe_parts: List[str] = []
+            if trait_clause:
+                vibe_parts.append(trait_clause.capitalize())
+            if mood_clause:
+                vibe_parts.append(f"I'm {mood_clause}")
+            vibe_sentence = ""
+            if vibe_parts:
+                vibe_sentence = ", ".join(vibe_parts)
+                if not vibe_sentence.endswith("."):
+                    vibe_sentence += "."
+            if hormone_sentence:
+                if vibe_sentence:
+                    vibe_sentence = f"{vibe_sentence.rstrip()} {hormone_sentence}"
+                else:
+                    vibe_sentence = hormone_sentence
+            if vibe_sentence:
+                segments.append(vibe_sentence)
+
+        def _add_segment(text: str) -> None:
+            if text and len(segments) < max_sentences:
+                segments.append(text.strip())
+
+        if memory_notes:
+            memory_line = self._memory_line(memory_notes[0])
+            _add_segment(memory_line)
+
+        if attachments:
+            vision_line = self._vision_line(attachments[0])
+            _add_segment(vision_line)
+
+        if relationship_notes:
+            rel_line = relationship_notes[0].strip()
+            if rel_line:
+                rel_line = rel_line.rstrip(".")
+                rel_line = rel_line[0].upper() + rel_line[1:]
+                follow: List[str] = [rel_line]
+                if rel_stats.last_gap > 900:
+                    follow.append(f"Been { _format_gap(rel_stats.last_gap) } since we really chatted.")
+                rel_sentence = " ".join(follow)
+                _add_segment(f"By the way, {rel_sentence}")
+
+        if context.get("channel_density", 0) > 0.7:
+            _add_segment("Chat's buzzing, so I'll keep it quick.")
+
+        if signature_terms:
+            sig = signature_terms[0]
+            if sig:
+                _add_segment(f"Getting big {sig} energy from this thread.")
+
+        if user_emotion in {"hurt", "anxious"} and len(segments) < max_sentences:
+            _add_segment("I'm keeping things extra gentle with you.")
+
+        combined = " ".join(part for part in segments if part)
+        if emoji_rate > 0.18:
+            emoji = sample_emoji or "🙂"
+            if emoji not in combined:
+                combined = f"{combined} {emoji}"
 
         return self._limit_sentences(combined, max_sentences=max_sentences)
 
@@ -1371,29 +1478,6 @@ class MixtureBrain:
             should_wait = False
         return "" if should_wait else None
 
-    def should_participate(self, context: Dict[str, object]) -> bool:
-        context_snapshot = self._context_snapshot(context)
-        snapshot = self.hormones.snapshot()
-        hormone_map = snapshot.get("hormone_map", {})
-        if context_snapshot.get("pinged"):
-            return True
-        if context_snapshot.get("priority_hint") == "high":
-            return True
-        cortisol = hormone_map.get("cortisol", 0.5)
-        melatonin = hormone_map.get("melatonin", 0.4)
-        dopamine = hormone_map.get("dopamine", 0.5)
-        oxytocin = hormone_map.get("oxytocin", 0.5)
-        lively = context_snapshot.get("channel_density", 0) > 0.35 or context_snapshot.get("active_users", 1) > 3
-        if cortisol > 0.65 and not context_snapshot.get("direct_reference"):
-            return False
-        if melatonin > 0.6 and not context_snapshot.get("direct_reference"):
-            return False
-        if lively and (dopamine + oxytocin) > 1.15:
-            return True
-        if context_snapshot.get("mentions_memory"):
-            return True
-        return (dopamine + oxytocin) > 0.9
-
     def respond(
         self,
         query: str,
@@ -1463,6 +1547,7 @@ class MixtureBrain:
             phase,
             reflection,
             context_snapshot,
+            context_snapshot.get("channel_profile"),
             route,
         )
 
@@ -1508,6 +1593,7 @@ class MixtureBrain:
             intent,
             context_snapshot,
             persona_snapshot,
+            context_snapshot.get("channel_profile"),
             attachments_list,
         )
         self.memory.add("user", query)
@@ -1769,6 +1855,10 @@ def detect_user_intent(text: str) -> str:
     for intent, keywords in INTENT_KEYWORDS:
         if any(keyword in lowered for keyword in keywords):
             return intent
+
+    distress_markers = EMOTION_KEYWORDS.get("hurt", []) + EMOTION_KEYWORDS.get("anxious", [])
+    if any(marker in lowered for marker in distress_markers):
+        return "support"
 
     if any(keyword in lowered for keyword in CODE_KEYWORDS_LOWER):
         return "technical"

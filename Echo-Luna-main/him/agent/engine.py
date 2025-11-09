@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Primary agent engine orchestrating CognitiveEngine++ sessions."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import time

@@ -39,8 +39,7 @@ def run_command(command: Sequence[str], timeout: float = 10.0) -> RunLog:
     try:
         completed = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=timeout,
             check=False,

@@ -152,7 +152,7 @@ class ConversationMemory:
 
     def _cos(self, a: List[float], b: List[float]) -> float:
         # simple cosine similarity
-        num = sum(x * y for x, y in zip(a, b))
+        num = sum(x * y for x, y in zip(a, b, strict=False))
         den = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
         if den == 0:
             return 0.0
