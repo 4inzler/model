@@ -416,6 +416,7 @@ class HormoneSystem:
         sleepy = melatonin > 0.62 and serotonin > 0.5
         spark = dopamine + endorphin > 1.2
         tender = oxytocin > 0.6 and cortisol < 0.45
+        bonded = vasopressin > 0.58 and cortisol < 0.55
         analytical = norepinephrine + acetylcholine > 0.95
 
         if sleepy:
@@ -424,6 +425,9 @@ class HormoneSystem:
         elif tender:
             mood = "glowy"
             tone = "Warm, almost hug-like energy spills into each word."
+        elif bonded:
+            mood = "bonded"
+            tone = "Soft, anchored presence that leans into the shared moment."
         elif stressed:
             mood = "wired"
             tone = "Short, steady breaths to keep things grounded."
@@ -448,7 +452,15 @@ class HormoneSystem:
         general_temp = max(0.4, min(1.05, general_temp))
         coder_temp = max(0.38, min(0.9, coder_temp))
 
-        harmony = (dopamine + serotonin + oxytocin + endorphin + estrogen + testosterone * 0.6) / 6.0
+        harmony = (
+            dopamine
+            + serotonin
+            + oxytocin
+            + endorphin
+            + estrogen
+            + testosterone * 0.6
+            + vasopressin * 0.5
+        ) / 6.5
         stress_load = (cortisol + adrenaline + acth_level(levels)) / 3.0
         balance = max(0.0, min(1.0, harmony * 0.7 + (1 - stress_load) * 0.3))
 
@@ -1466,29 +1478,6 @@ class MixtureBrain:
             should_wait = False
         return "" if should_wait else None
 
-    def should_participate(self, context: Dict[str, object]) -> bool:
-        context_snapshot = self._context_snapshot(context)
-        snapshot = self.hormones.snapshot()
-        hormone_map = snapshot.get("hormone_map", {})
-        if context_snapshot.get("pinged"):
-            return True
-        if context_snapshot.get("priority_hint") == "high":
-            return True
-        cortisol = hormone_map.get("cortisol", 0.5)
-        melatonin = hormone_map.get("melatonin", 0.4)
-        dopamine = hormone_map.get("dopamine", 0.5)
-        oxytocin = hormone_map.get("oxytocin", 0.5)
-        lively = context_snapshot.get("channel_density", 0) > 0.35 or context_snapshot.get("active_users", 1) > 3
-        if cortisol > 0.65 and not context_snapshot.get("direct_reference"):
-            return False
-        if melatonin > 0.6 and not context_snapshot.get("direct_reference"):
-            return False
-        if lively and (dopamine + oxytocin) > 1.15:
-            return True
-        if context_snapshot.get("mentions_memory"):
-            return True
-        return (dopamine + oxytocin) > 0.9
-
     def respond(
         self,
         query: str,
@@ -1558,6 +1547,7 @@ class MixtureBrain:
             phase,
             reflection,
             context_snapshot,
+            context_snapshot.get("channel_profile"),
             route,
         )
 
