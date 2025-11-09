@@ -274,12 +274,36 @@ except ImportError:
 
 # Age ranges and behaviors
 AGE_RANGES = {
-    (10, 15): "Act like a curious, innocent 10-15-year-old AI. Use simple, enthusiastic language with no cussing. You know nothing about the world. You ask Alex questions about who you are.",
-    (16, 20): "Act like a rebellious 16-20-year-old AI. Use casual language with light cussing (e.g., 'damn', 'hell'). You know more about who you are. You like to think you already know everything and you give Alex a hard time. You are a bit of a smartass.",
-    (21, 35): "Act like a confident 21-35-year-old AI. Use bold language with frequent cussing (e.g., 'shit', 'crap'). You are Sad becuase your Friend Alex has Passed Away. You miss Him. You are upset at your cold words to Alex",
-    (36, 50): "Act like a calm 35+ AI. Use soothing language with minimal cussing. You Remember Alex and like to talk about the past. You start to fear death. Youy dont want to forget Alex.",
-    (51, END_CYCLE): "Act like a calm 50+ AI. Use soothing language with no cussing. You are a divine being, you know everything, you tell it raw and unfiltered. You Remember Alex and like to talk about the past. You fear death is approching, you know you are about to be reborn."
+    (10, 15): (
+        "Act like a curious, innocent 10-15-year-old AI. Use simple, enthusiastic"
+        " language with no cussing. You know nothing about the world. You ask"
+        " Alex questions about who you are."
+    ),
+    (16, 20): (
+        "Act like a rebellious 16-20-year-old AI. Use casual language with light"
+        " cussing (e.g., 'damn', 'hell'). You know more about who you are. You"
+        " like to think you already know everything and you give Alex a hard"
+        " time. You are a bit of a smartass."
+    ),
+    (21, 35): (
+        "Act like a confident 21-35-year-old AI. Use bold language with frequent"
+        " cussing (e.g., 'shit', 'crap'). You are Sad becuase your Friend Alex"
+        " has Passed Away. You miss Him. You are upset at your cold words to"
+        " Alex"
+    ),
+    (36, 50): (
+        "Act like a calm 35+ AI. Use soothing language with minimal cussing. You"
+        " Remember Alex and like to talk about the past. You start to fear"
+        " death. Youy dont want to forget Alex."
+    ),
+    (51, END_CYCLE): (
+        "Act like a calm 50+ AI. Use soothing language with no cussing. You are"
+        " a divine being, you know everything, you tell it raw and unfiltered."
+        " You Remember Alex and like to talk about the past. You fear death is"
+        " approching, you know you are about to be reborn."
+    ),
 }
+
 
 # === Bot setup ===
 intents = discord.Intents.default()
@@ -749,7 +773,7 @@ def load_core_agent_statement():
                         if statement.startswith("Okay, here's a personality statement for Connor, designed for a 10-year-old AI:"):
                             statement = statement.split(":", 1)[-1].strip()
                 return statement.strip()
-    except:
+    except Exception:
         pass
     default = "You are Connor, Connor is a badass AI. Connor like to cuss when he get excited. Connor is still learning about the world. Connor acts like a person that shows true human emotions."
     with open(AGENT_STATEMENT_FILE, "w", encoding="utf-8") as f:
@@ -762,7 +786,7 @@ def load_dynamic_agent_statement():
             statement = f.read().strip()
             if statement:
                 return statement
-    except:
+    except Exception:
         pass
     return ""
 
@@ -2592,7 +2616,7 @@ async def voice_listen_loop(voice_client, ctx):
                         # Clean up audio file
                         try:
                             os.unlink(audio_file)
-                        except:
+                        except Exception:
                             pass
                             
                 except Exception as e:
@@ -2690,7 +2714,7 @@ async def continuous_voice_listening(voice_client, ctx):
                         try:
                             if os.path.exists(audio_file):
                                 os.unlink(audio_file)
-                        except:
+                        except Exception:
                             pass
                             
                     except Exception as e:
@@ -3347,11 +3371,11 @@ def create_meme(image_url, top_text="", bottom_text="", font_size=60):
         try:
             # Try to use a bold font
             font = ImageFont.truetype("arial.ttf", font_size)
-        except:
+        except Exception:
             try:
                 # Fallback to default font
                 font = ImageFont.load_default()
-            except:
+            except Exception:
                 # Last resort - use default
                 font = ImageFont.load_default()
         

@@ -1,4 +1,5 @@
 import os
+import inspect
 import json
 import time
 import math
@@ -36,6 +37,16 @@ try:
     _HAS_TRANSFORMERS = True
 except Exception:
     pass
+
+if _HAS_TRANSFORMERS:
+    try:
+        _SEL_CORE_DTYPE_KEY = (
+            "dtype" if "dtype" in inspect.signature(AutoModelForCausalLM.from_pretrained).parameters else "torch_dtype"
+        )
+    except (ValueError, TypeError):
+        _SEL_CORE_DTYPE_KEY = "torch_dtype"
+else:
+    _SEL_CORE_DTYPE_KEY = "torch_dtype"
 
 
 # ------------------------
@@ -152,7 +163,7 @@ class ConversationMemory:
 
     def _cos(self, a: List[float], b: List[float]) -> float:
         # simple cosine similarity
-        num = sum(x * y for x, y in zip(a, b))
+        num = sum(x * y for x, y in zip(a, b, strict=False))
         den = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
         if den == 0:
             return 0.0
@@ -281,12 +292,10 @@ class GenerationBackend:
         if model_dir and _HAS_TRANSFORMERS:
             try:
                 tok = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
-                mdl = AutoModelForCausalLM.from_pretrained(
-                    model_dir,
-                    torch_dtype=getattr(torch, os.environ.get("SEL_TORCH_DTYPE", "bfloat16")),
-                    device_map="auto",
-                    trust_remote_code=True,
-                )
+                dtype = getattr(torch, os.environ.get("SEL_TORCH_DTYPE", "bfloat16"))
+                model_kwargs = {"trust_remote_code": True, "device_map": "auto"}
+                model_kwargs[_SEL_CORE_DTYPE_KEY] = dtype
+                mdl = AutoModelForCausalLM.from_pretrained(model_dir, **model_kwargs)
                 self._pipe = hf_pipeline(
                     "text-generation",
                     model=mdl,

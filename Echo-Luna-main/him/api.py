@@ -2,15 +2,11 @@ from __future__ import annotations
 
 """FastAPI application factory for Echo-Luna HIM cognitive services."""
 
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 
 from .storage import HierarchicalImageMemory
-
-
-def _app(request: Request) -> FastAPI:
-    return request.app
 
 
 def _get_store(app: FastAPI) -> HierarchicalImageMemory:
@@ -29,20 +25,20 @@ def create_app(store: HierarchicalImageMemory, *, with_agent: bool = True, agent
     router = APIRouter(prefix="/v1", tags=["core"])
 
     @router.get("/snapshots")
-    def list_snapshots(app: FastAPI = Depends(_app)) -> Dict[str, Any]:
-        return {"items": _get_store(app).list_snapshots()}
+    def list_snapshots(request: Request) -> Dict[str, Any]:
+        return {"items": _get_store(request.app).list_snapshots()}
 
     @router.post("/snapshots")
-    def create_snapshot(payload: Dict[str, Any], app: FastAPI = Depends(_app)) -> Dict[str, Any]:
+    def create_snapshot(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
         snapshot_id = payload.get("snapshot_id")
         metadata = payload.get("metadata")
-        store = _get_store(app)
+        store = _get_store(request.app)
         snapshot_id = store.create_snapshot(snapshot_id, metadata=metadata)
         return {"snapshot_id": snapshot_id}
 
     @router.get("/snapshots/{snapshot_id}")
-    def get_snapshot(snapshot_id: str, app: FastAPI = Depends(_app)) -> Dict[str, Any]:
-        store = _get_store(app)
+    def get_snapshot(snapshot_id: str, request: Request) -> Dict[str, Any]:
+        store = _get_store(request.app)
         try:
             return store.get_snapshot(snapshot_id)
         except KeyError as exc:  # pragma: no cover - defensive
@@ -52,18 +48,18 @@ def create_app(store: HierarchicalImageMemory, *, with_agent: bool = True, agent
     def list_tiles(
         stream: str,
         snapshot_id: str,
-        level: Optional[int] = Query(default=None),
-        x: Optional[int] = Query(default=None),
-        y: Optional[int] = Query(default=None),
-        app: FastAPI = Depends(_app),
+        level: Annotated[Optional[int], Query(default=None)] = None,
+        x: Annotated[Optional[int], Query(default=None)] = None,
+        y: Annotated[Optional[int], Query(default=None)] = None,
+        request: Request,
     ) -> Dict[str, Any]:
-        store = _get_store(app)
+        store = _get_store(request.app)
         tiles = store.list_tiles(stream, snapshot_id, level=level, x=x, y=y)
         return {"items": tiles}
 
     @router.get("/tiles/{stream}/{snapshot_id}/{tile_id}")
-    def fetch_tile(stream: str, snapshot_id: str, tile_id: str, app: FastAPI = Depends(_app)) -> Dict[str, Any]:
-        store = _get_store(app)
+    def fetch_tile(stream: str, snapshot_id: str, tile_id: str, request: Request) -> Dict[str, Any]:
+        store = _get_store(request.app)
         try:
             return store.read_tile_by_id(stream, snapshot_id, tile_id)
         except FileNotFoundError as exc:
