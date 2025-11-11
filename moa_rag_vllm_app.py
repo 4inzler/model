@@ -223,9 +223,9 @@ class VectorStore:
             return []
         if FAISS_AVAILABLE:
             self._ensure_index()
-            D, I = self.index.search(q, k)
-            indices = I[0].tolist()
-            scores = D[0].tolist()
+            distances, neighbors = self.index.search(q, k)
+            indices = neighbors[0].tolist()
+            scores = distances[0].tolist()
         else:
             if self._vectors is None or self._vectors.size == 0:
                 return []
@@ -234,7 +234,7 @@ class VectorStore:
             indices = top.tolist()
             scores = sims[top].astype(float).tolist()
         results = []
-        for idx, score in zip(indices, scores):
+        for idx, score in zip(indices, scores, strict=False):
             if idx < 0 or idx >= len(self.metas):
                 continue
             meta = self.metas[idx].copy()
@@ -315,7 +315,7 @@ class DeepSeekOCR:
                     out_paths.append(str(out))
                 return out_paths
             except Exception as e:
-                raise RuntimeError(f"Install pdf2image or pypdfium2 to OCR PDFs: {e}")
+                raise RuntimeError("Install pdf2image or pypdfium2 to OCR PDFs") from e
 
     def ocr_pdf(self, pdf_path: str, mode: str = 'markdown') -> str:
         imgs = self._pdf_to_images(pdf_path)

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """FastAPI router exposing CognitiveEngine++ agent endpoints."""
+
+from __future__ import annotations
 
 from typing import Dict, List
 
