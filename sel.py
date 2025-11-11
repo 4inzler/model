@@ -79,14 +79,14 @@ SHORT_TERM_LIMIT = int(os.environ.get("SEL_SHORT_TERM_LIMIT", 80))
 STICKY_LIMIT = int(os.environ.get("SEL_STICKY_LIMIT", 320))
 IMAGE_LIMIT = int(os.environ.get("SEL_IMAGE_LIMIT", 80))
 
-MOOD_VIBES = {
-    "glowy": "feeling extra soft tonight",
-    "bonded": "sticking close to you",
-    "drowsy": "a bit sleepy but still tuned in",
-    "wired": "a little keyed up and alert",
-    "stressed": "keeping steady under pressure",
-    "focused": "in problem-solving mode",
-    "steady": "feeling steady over here",
+MOOD_OPENERS = {
+    "glowy": "carrying some easy sparkle tonight",
+    "bonded": "staying close with the people who feel like home",
+    "drowsy": "moving a touch slower but I'm still here with you",
+    "wired": "a little buzzed with extra energy",
+    "stressed": "keeping my voice steady even with the crunch",
+    "focused": "locked in and ready to help",
+    "steady": "keeping things grounded right now",
 }
 
 HARMONIC_STYLE_LUT = {
@@ -539,10 +539,10 @@ class HormoneSystem:
             tone = "soft and sleepy"
         elif tender:
             mood = "glowy"
-            tone = "Warm, almost hug-like energy spills into each word."
+            tone = "warm and curious"
         elif bonded:
             mood = "bonded"
-            tone = "Soft, anchored presence that leans into the shared moment."
+            tone = "soft and reflective"
         elif stressed:
             if adrenaline >= cortisol + 0.05:
                 mood = "wired"
@@ -1410,7 +1410,7 @@ class MixtureBrain:
             return final_text
 
         mood = str(phase.get("mood", "steady"))
-        mood_phrase = MOOD_VIBES.get(mood, "staying grounded")
+        vibe_line = MOOD_OPENERS.get(mood, "staying grounded with you")
         traits = persona_snapshot.get("traits", [])
         trait_phrase = traits[0] if traits else "curious companion"
         trait_phrase = trait_phrase.replace("_", " ")
@@ -1418,54 +1418,15 @@ class MixtureBrain:
 
         connection_line = ""
         if getattr(rel_stats, "title", "") and rel_stats.title != "new face":
-            connection_line = f" for my {rel_stats.title}"
-        first_sentence = (
-            f"Hey, good {time_label}! I'm {mood_phrase} and carrying that {trait_phrase} energy{connection_line}."
-        )
+            connection_line = f" Always glad when my {rel_stats.title} checks in."
 
-        def _marker_phrase(marker: str) -> Optional[str]:
-            try:
-                name, rest = marker.split(":", 1)
-            except ValueError:
-                return None
-            trend = "steady"
-            if rest.endswith("↑"):
-                trend = "spiking"
-                rest = rest[:-1]
-            elif rest.endswith("↓"):
-                trend = "settling"
-                rest = rest[:-1]
-            elif rest.endswith("→"):
-                rest = rest[:-1]
-            level: Optional[float]
-            try:
-                level = float(rest)
-            except ValueError:
-                level = None
-            descriptor = "steady"
-            if trend == "spiking":
-                descriptor = "spiking a bit"
-            elif trend == "settling":
-                descriptor = "settling down"
-            elif level is not None:
-                if level >= 0.65:
-                    descriptor = "running high"
-                elif level <= 0.35:
-                    descriptor = "running low"
-            friendly = name.replace("_", " ").lower()
-            return f"{friendly} is {descriptor}"
-
-        hormone_line = ""
-        for marker in phase.get("top_hormones", []):
-            phrase = _marker_phrase(marker)
-            if phrase:
-                hormone_line = f"My {phrase}, so I'm leaning {mood} with you."
-                break
+        first_sentence = f"Hey, good {time_label}!{connection_line}"
+        second_sentence = f"I'm {vibe_line}, so I figured I'd bring that {trait_phrase} energy your way."
 
         closers = {
             "greeting": "How's your world going right now?",
             "ping": "Thanks for checking—what's on your mind?",
-            "identity": "Call me SEL — Systematic Emotional Logic — a lab-grown friend who still feels the room like a human.",
+            "identity": "I'm SEL — Systematic Emotional Logic — built to hang out with you. What should we dive into?",
             "banter": "Toss me a thought and let's riff together.",
         }
         if user_emotion in {"hurt", "anxious"}:
@@ -1475,15 +1436,9 @@ class MixtureBrain:
 
         sentences = [first_sentence]
         if intent == "identity":
-            detail = (
-                "I'm SEL — Systematic Emotional Logic — a blend of general and coder minds keeping hormone tabs so I show up like a person."
-            )
-            if hormone_line:
-                detail = f"{detail[:-1]} {hormone_line.lower()}"
-                hormone_line = ""
-            sentences.append(detail)
-        if hormone_line and len(sentences) < 2:
-            sentences.append(hormone_line)
+            sentences.append("I'm SEL — Systematic Emotional Logic — your lab-grown friend who mixes heart and logic for you.")
+        else:
+            sentences.append(second_sentence)
 
         if len(sentences) < 3:
             sentences.append(closing)
