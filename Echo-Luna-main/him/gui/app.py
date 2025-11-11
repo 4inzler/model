@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Desktop GUI for controlling the CognitiveEngine++ agent."""
+
+from __future__ import annotations
 
 import json
 import sys
@@ -317,7 +317,8 @@ class CognitiveEngineWindow(QtWidgets.QMainWindow):
         layout.setSpacing(12)
 
         self.dashboard_hint = QtWidgets.QLabel(
-            "1. Start or select a session. 2. Describe a goal. 3. Step once or let the agent auto-step while you observe the proxy chart and action log."
+            "1. Start or select a session. 2. Describe a goal. 3. Step once or let the"
+            " agent auto-step while you observe the proxy chart and action log."
         )
         self.dashboard_hint.setWordWrap(True)
         self.dashboard_hint.setStyleSheet("color: palette(mid);")

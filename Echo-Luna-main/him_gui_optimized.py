@@ -361,7 +361,7 @@ class OptimizedHIMGUI:
                 return False
                 
             return True
-        except:
+        except Exception:
             return True  # If we can't check, assume it's okay
             
     def should_run_cycle(self):
@@ -554,7 +554,7 @@ class OptimizedHIMGUI:
         # Save current state
         try:
             self.auto_save_state()
-        except:
+        except Exception:
             pass
             
         # Clear memory
@@ -738,14 +738,19 @@ class OptimizedHIMGUI:
                     # Update system metrics
                     cpu_percent = psutil.cpu_percent()
                     memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
-                    
+
+                    if 'CPU Usage' in self.perf_labels:
+                        self.perf_labels['CPU Usage'].config(text=f"{cpu_percent:.1f}%")
+                    if 'Memory Usage' in self.perf_labels:
+                        self.perf_labels['Memory Usage'].config(text=f"{memory_mb:.1f} MB")
+
                     # Check for memory growth
                     if len(self.memory_usage_history) > 0:
                         memory_growth = memory_mb - self.memory_usage_history[0] if self.memory_usage_history else 0
                         self.perf_labels['Memory Growth'].config(text=f"{memory_growth:.1f} MB")
                     
                     time.sleep(5)  # Update every 5 seconds
-                except:
+                except Exception:
                     break
                     
         monitor_thread = threading.Thread(target=monitor, daemon=True)
@@ -767,7 +772,7 @@ class OptimizedHIMGUI:
         try:
             self.status_text.insert(tk.END, message)
             self.status_text.see(tk.END)
-        except:
+        except Exception:
             pass
             
     # Placeholder methods for other tabs (simplified)

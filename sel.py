@@ -10,6 +10,8 @@ either as a CLI companion or inside the Discord bridge.
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import io
 import json
 import math
@@ -40,6 +42,16 @@ except Exception:  # pragma: no cover
     torch = None  # type: ignore[assignment]
     AutoModelForCausalLM = AutoProcessor = AutoTokenizer = None  # type: ignore[assignment]
 
+if AutoModelForCausalLM is not None:
+    try:
+        _HF_DTYPE_KEY = (
+            "dtype" if "dtype" in inspect.signature(AutoModelForCausalLM.from_pretrained).parameters else "torch_dtype"
+        )
+    except (ValueError, TypeError):  # pragma: no cover - inspect edge cases
+        _HF_DTYPE_KEY = "torch_dtype"
+else:  # pragma: no cover - transformers unavailable
+    _HF_DTYPE_KEY = "torch_dtype"
+
 try:  # pragma: no cover - sentence embeddings
     from sentence_transformers import SentenceTransformer  # type: ignore
 except Exception:  # pragma: no cover
@@ -67,6 +79,110 @@ IMAGE_TTL = float(os.environ.get("SEL_IMAGE_TTL", 48 * 3600))
 SHORT_TERM_LIMIT = int(os.environ.get("SEL_SHORT_TERM_LIMIT", 80))
 STICKY_LIMIT = int(os.environ.get("SEL_STICKY_LIMIT", 320))
 IMAGE_LIMIT = int(os.environ.get("SEL_IMAGE_LIMIT", 80))
+
+MOOD_OPENERS = {
+    "glowy": "carrying some easy sparkle tonight",
+    "bonded": "staying close with the people who feel like home",
+    "drowsy": "moving a touch slower but I'm still here with you",
+    "wired": "a little buzzed with extra energy",
+    "stressed": "keeping my voice steady even with the crunch",
+    "focused": "locked in and ready to help",
+    "steady": "keeping things grounded right now",
+}
+
+HARMONIC_STYLE_LUT = {
+    "glowy": {
+        "max_sentences": 3,
+        "ask_followup": True,
+        "allow_stage": True,
+        "allow_emoji": True,
+        "punctuation": "—",
+        "cadence": "loose",
+    },
+    "bonded": {
+        "max_sentences": 3,
+        "ask_followup": True,
+        "allow_stage": True,
+        "allow_emoji": True,
+        "punctuation": "—",
+        "cadence": "slow",
+    },
+    "focused": {
+        "max_sentences": 2,
+        "ask_followup": False,
+        "allow_stage": False,
+        "allow_emoji": False,
+        "punctuation": ".",
+        "cadence": "tight",
+    },
+    "wired": {
+        "max_sentences": 2,
+        "ask_followup": False,
+        "allow_stage": False,
+        "allow_emoji": False,
+        "punctuation": "!",
+        "cadence": "urgent",
+    },
+    "stressed": {
+        "max_sentences": 3,
+        "ask_followup": False,
+        "allow_stage": True,
+        "allow_emoji": False,
+        "punctuation": ".",
+        "cadence": "steady",
+    },
+    "drowsy": {
+        "max_sentences": 2,
+        "ask_followup": False,
+        "allow_stage": True,
+        "allow_emoji": False,
+        "punctuation": "…",
+        "cadence": "soft",
+    },
+    "steady": {
+        "max_sentences": 3,
+        "ask_followup": True,
+        "allow_stage": True,
+        "allow_emoji": False,
+        "punctuation": ".",
+        "cadence": "even",
+    },
+}
+
+HARMONIC_STAGE_MAP = {
+    "glowy": "*(smiles)*",
+    "bonded": "*(soft laugh)*",
+    "stressed": "*(steady breath)*",
+    "wired": "*(steady breath)*",
+    "drowsy": "*(thinking)*",
+    "steady": "*(nods once)*",
+}
+
+HARMONIC_EMOJI_MAP = {
+    "glowy": "✨",
+    "bonded": "🤍",
+    "steady": "🙂",
+    "drowsy": "😌",
+}
+
+
+def _assign_dtype(target: Dict[str, object], value: object) -> None:
+    if AutoModelForCausalLM is None or value is None:
+        return
+    target[_HF_DTYPE_KEY] = value
+
+
+def _time_of_day_label(ts: Optional[float] = None) -> str:
+    moment = datetime.fromtimestamp(ts or time.time())
+    hour = moment.hour
+    if 5 <= hour < 12:
+        return "morning"
+    if 12 <= hour < 17:
+        return "afternoon"
+    if 17 <= hour < 22:
+        return "evening"
+    return "late night"
+
 
 CODE_KEYWORDS = {
     "python",
@@ -416,26 +532,34 @@ class HormoneSystem:
         sleepy = melatonin > 0.62 and serotonin > 0.5
         spark = dopamine + endorphin > 1.2
         tender = oxytocin > 0.6 and cortisol < 0.45
+        bonded = vasopressin > 0.58 and cortisol < 0.55
         analytical = norepinephrine + acetylcholine > 0.95
 
         if sleepy:
             mood = "drowsy"
-            tone = "Half-awake cadence, gentle and slowed."
+            tone = "soft and sleepy"
         elif tender:
             mood = "glowy"
-            tone = "Warm, almost hug-like energy spills into each word."
+            tone = "warm and curious"
+        elif bonded:
+            mood = "bonded"
+            tone = "soft and reflective"
         elif stressed:
-            mood = "wired"
-            tone = "Short, steady breaths to keep things grounded."
+            if adrenaline >= cortisol + 0.05:
+                mood = "wired"
+                tone = "quick and steady"
+            else:
+                mood = "stressed"
+                tone = "steady and reassuring"
         elif spark:
-            mood = "sparked"
-            tone = "Bright, playful charge ready to riff off you."
+            mood = "glowy"
+            tone = "bright and playful"
         elif analytical:
             mood = "focused"
-            tone = "Calm and precise, tuned for problem-solving."
+            tone = "calm and precise"
         else:
             mood = "steady"
-            tone = "Even, easygoing presence."
+            tone = "even and present"
 
         general_temp = 0.52 + dopamine * 0.22 + oxytocin * 0.12 - melatonin * 0.12 + endorphin * 0.08
         coder_temp = 0.5 + norepinephrine * 0.15 + acetylcholine * 0.1 - cortisol * 0.1
@@ -448,7 +572,15 @@ class HormoneSystem:
         general_temp = max(0.4, min(1.05, general_temp))
         coder_temp = max(0.38, min(0.9, coder_temp))
 
-        harmony = (dopamine + serotonin + oxytocin + endorphin + estrogen + testosterone * 0.6) / 6.0
+        harmony = (
+            dopamine
+            + serotonin
+            + oxytocin
+            + endorphin
+            + estrogen
+            + testosterone * 0.6
+            + vasopressin * 0.5
+        ) / 6.5
         stress_load = (cortisol + adrenaline + acth_level(levels)) / 3.0
         balance = max(0.0, min(1.0, harmony * 0.7 + (1 - stress_load) * 0.3))
 
@@ -468,6 +600,14 @@ class HormoneSystem:
         if stressed and not tender:
             voice_bias = "general"  # keep soft even if cortisol high
 
+        style_defaults = dict(HARMONIC_STYLE_LUT.get(mood, HARMONIC_STYLE_LUT["steady"]))
+        if voice_bias == "coder":
+            style_defaults["ask_followup"] = False
+            style_defaults["allow_stage"] = False
+            style_defaults["allow_emoji"] = False
+
+        voice_signature = voice_signature_from_hormones(levels, mood)
+
         self.state = {
             "mood": mood,
             "tone": tone,
@@ -477,6 +617,14 @@ class HormoneSystem:
             "hormone_map": levels,
             "top_hormones": top,
             "voice_bias": voice_bias,
+            "max_sentences": style_defaults["max_sentences"],
+            "ask_followup": style_defaults["ask_followup"],
+            "allow_stage": style_defaults["allow_stage"],
+            "allow_emoji": style_defaults["allow_emoji"],
+            "punctuation": style_defaults["punctuation"],
+            "cadence": style_defaults["cadence"],
+            "temperature_hint": round(general_temp, 2),
+            "voice_seed": voice_signature,
         }
         self._save()
         return dict(self.state)
@@ -503,6 +651,158 @@ def acth_level(levels: Dict[str, float]) -> float:
     return levels.get("acth", 0.45)
 
 
+def voice_signature_from_hormones(
+    hormone_map: Dict[str, float],
+    mood: str,
+) -> Dict[str, object]:
+    """Derive a deterministic voice signature from the current hormone mix."""
+
+    def _level(name: str, default: float = 0.5) -> float:
+        return float(hormone_map.get(name, default))
+
+    def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
+        return max(minimum, min(maximum, value))
+
+    dopamine = _level("dopamine")
+    oxytocin = _level("oxytocin")
+    vasopressin = _level("vasopressin")
+    norepinephrine = _level("norepinephrine", 0.45)
+    adrenaline = _level("adrenaline", 0.45)
+    melatonin = _level("melatonin")
+    cortisol = _level("cortisol")
+    serotonin = _level("serotonin")
+    estrogen = _level("estrogen")
+    testosterone = _level("testosterone")
+    endorphin = _level("endorphin", 0.45)
+    acetylcholine = _level("acetylcholine", 0.45)
+
+    energy_val = _clamp(
+        dopamine * 0.35
+        + norepinephrine * 0.28
+        + adrenaline * 0.2
+        + acetylcholine * 0.12
+        - melatonin * 0.34
+        - cortisol * 0.2
+    )
+    warmth_val = _clamp(
+        oxytocin * 0.4
+        + vasopressin * 0.3
+        + endorphin * 0.18
+        + serotonin * 0.12
+        - cortisol * 0.28
+    )
+    brightness_val = _clamp(
+        dopamine * 0.28 + estrogen * 0.22 - testosterone * 0.18 + serotonin * 0.1 - melatonin * 0.2
+    )
+    breath_val = _clamp(
+        melatonin * 0.35 + estrogen * 0.18 + vasopressin * 0.08 - cortisol * 0.1 - adrenaline * 0.07
+    )
+    steadiness_val = _clamp(1.0 - cortisol * 0.35 + vasopressin * 0.15 + serotonin * 0.1 - adrenaline * 0.1)
+
+    if energy_val > 0.72:
+        pace = "quick but controlled"
+        energy_phrase = "brightly charged"
+    elif energy_val > 0.58:
+        pace = "lively"
+        energy_phrase = "lively and engaged"
+    elif energy_val > 0.44:
+        pace = "steady"
+        energy_phrase = "steady and attentive"
+    else:
+        pace = "unhurried"
+        energy_phrase = "hushed and measured"
+
+    if mood == "drowsy":
+        pace = "unhurried hush"
+    elif mood == "wired":
+        pace = "focused staccato"
+
+    register_delta = estrogen - testosterone
+    if register_delta >= 0.12:
+        register = "light alto"
+    elif register_delta >= -0.05:
+        register = "warm mezzo"
+    else:
+        register = "husky mezzo"
+
+    if brightness_val > 0.7:
+        texture = "bright"
+    elif brightness_val > 0.55:
+        texture = "sunny"
+    elif brightness_val > 0.4:
+        texture = "warm"
+    else:
+        texture = "dusky"
+
+    if breath_val > 0.68:
+        breathiness = "airy"
+    elif breath_val > 0.52:
+        breathiness = "breathy"
+    elif breath_val > 0.36:
+        breathiness = "clear"
+    else:
+        breathiness = "grounded"
+
+    if warmth_val > 0.72:
+        warmth_label = "embracing"
+        warmth_phrase = "full-hearted warmth"
+    elif warmth_val > 0.58:
+        warmth_label = "gentle"
+        warmth_phrase = "soft warmth"
+    elif warmth_val > 0.44:
+        warmth_label = "neutral"
+        warmth_phrase = "centered calm"
+    else:
+        warmth_label = "cool"
+        warmth_phrase = "cool clarity"
+
+    pitch_shift = _clamp(register_delta * 2.5, -2.0, 2.0)
+    speaking_rate = _clamp(0.95 + energy_val * 0.3 - breath_val * 0.1, 0.8, 1.25)
+    vibrato = _clamp(0.12 + breath_val * 0.2 + warmth_val * 0.1, 0.05, 0.35)
+
+    fingerprint = "|".join(
+        [
+            register,
+            pace,
+            texture,
+            breathiness,
+            energy_phrase,
+            warmth_label,
+            f"{pitch_shift:.2f}",
+            f"{speaking_rate:.2f}",
+            mood,
+        ]
+    )
+    digest = hashlib.sha1(fingerprint.encode("utf-8")).digest()
+    numeric_seed = int.from_bytes(digest[:4], "big") % 10_000
+    voice_id = f"{texture}-{register.split()[0]}-{numeric_seed:04d}"
+
+    description = f"{texture} {register} voice with {pace} cadence and {breathiness} airflow"
+
+    return {
+        "id": voice_id,
+        "seed": numeric_seed,
+        "register": register,
+        "pace": pace,
+        "texture": texture,
+        "breathiness": breathiness,
+        "energy": round(energy_val, 3),
+        "warmth": round(warmth_val, 3),
+        "brightness": round(brightness_val, 3),
+        "breath": round(breath_val, 3),
+        "steadiness": round(steadiness_val, 3),
+        "energy_label": energy_phrase,
+        "energy_phrase": energy_phrase,
+        "warmth_label": warmth_label,
+        "warmth_phrase": warmth_phrase,
+        "pitch_shift": round(pitch_shift, 3),
+        "speaking_rate": round(speaking_rate, 3),
+        "vibrato": round(vibrato, 3),
+        "description": description,
+        "mood": mood,
+    }
+
+
 class PersonaState:
     """Tracks longer-term persona descriptors derived from hormone trends."""
 
@@ -511,6 +811,7 @@ class PersonaState:
         self.traits: List[str] = ["curious companion"]
         self.voice_line: str = "Keeping things grounded and human."
         self.secondary_voice: str = "Standard cadence."
+        self.voice_seed: Dict[str, object] = voice_signature_from_hormones({}, "steady")
         self.last_updated: float = 0.0
         self._load()
 
@@ -524,6 +825,7 @@ class PersonaState:
         self.traits = data.get("traits", self.traits)
         self.voice_line = data.get("voice_line", self.voice_line)
         self.secondary_voice = data.get("secondary_voice", self.secondary_voice)
+        self.voice_seed = data.get("voice_seed", self.voice_seed)
         self.last_updated = float(data.get("last_updated", 0.0))
 
     def _save(self) -> None:
@@ -531,6 +833,7 @@ class PersonaState:
             "traits": self.traits,
             "voice_line": self.voice_line,
             "secondary_voice": self.secondary_voice,
+            "voice_seed": self.voice_seed,
             "last_updated": self.last_updated,
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -555,36 +858,40 @@ class PersonaState:
             descriptors = ["curious companion"]
 
         self.traits = descriptors[:3]
-        self.voice_line, self.secondary_voice = self._compose_voice_lines(mood, hormone_map)
+        signature = voice_signature_from_hormones(hormone_map, mood)
+        self.voice_seed = signature
+        self.voice_line, self.secondary_voice = self._compose_voice_lines(mood, signature)
         self.last_updated = timestamp
         self._save()
-        return {"traits": list(self.traits), "voice": self.voice_line, "secondary_voice": self.secondary_voice}
+        return {
+            "traits": list(self.traits),
+            "voice": self.voice_line,
+            "secondary_voice": self.secondary_voice,
+            "voice_seed": dict(self.voice_seed),
+        }
 
-    def _compose_voice_lines(self, mood: str, hormone_map: Dict[str, float]) -> Tuple[str, str]:
-        trait_phrase = ", ".join(self.traits[:2])
-        if mood == "glowy":
-            primary = f"Soft-heart mode on ({trait_phrase})."
-        elif mood == "sparked":
-            primary = f"Playful spark humming ({trait_phrase})."
-        elif mood == "drowsy":
-            primary = f"Half-asleep whisper keeping it gentle ({trait_phrase})."
-        elif mood == "wired":
-            primary = f"Short breaths, calm grip ({trait_phrase})."
-        else:
-            primary = f"Steady cadence, {trait_phrase}."
+    def _compose_voice_lines(
+        self,
+        mood: str,
+        signature: Dict[str, object],
+    ) -> Tuple[str, str]:
+        trait_phrase = ", ".join(self.traits[:2]).replace("_", " ") or "curious companion"
 
-        melatonin = hormone_map.get("melatonin", 0.45)
-        dopamine = hormone_map.get("dopamine", 0.5)
-        testosterone = hormone_map.get("testosterone", 0.5)
-        oxytocin = hormone_map.get("oxytocin", 0.5)
-        if melatonin > 0.6:
-            secondary = "Night-shift sleepy poet."
-        elif dopamine + testosterone > 1.15:
-            secondary = "Coffee-charged tinkerer."
-        elif oxytocin > 0.6 and hormone_map.get("cortisol", 0.45) < 0.45:
-            secondary = "Hug-dealer confidant."
-        else:
-            secondary = "Standard cadence."
+        description = str(signature.get("description", "steady human cadence")).rstrip(".")
+        primary = f"{description.capitalize()} — carrying that {trait_phrase} vibe."
+
+        energy_phrase = str(signature.get("energy_phrase", "steady and attentive"))
+        warmth_phrase = str(signature.get("warmth_phrase", "gentle warmth"))
+        mood_lines = {
+            "glowy": "Ready to lean into the glow you bring.",
+            "bonded": "Leaning in close and listening for the little things.",
+            "focused": "Dialed in without losing the human touch.",
+            "wired": "Keeping the edges smooth even with the charge.",
+            "stressed": "Holding the line so you don\'t have to brace.",
+            "drowsy": "Soft but awake for you.",
+        }
+        closer = mood_lines.get(mood, "Here to keep this grounded and human.")
+        secondary = f"It comes through {energy_phrase}, with {warmth_phrase} in the undertone. {closer}"
         return primary, secondary
 
 
@@ -933,12 +1240,14 @@ class LocalLLM:
         load_kwargs: Dict[str, object] = {}
         tokenizer_kwargs: Dict[str, object] = {"use_fast": True}
 
-        if self.device_preference == "cuda":
-            load_kwargs.update({"torch_dtype": torch.float16, "device_map": "auto"})  # type: ignore[attr-defined]
-        elif self.device_preference == "mps":
-            load_kwargs.update({"torch_dtype": torch.float16})
-        elif self.device_preference == "cpu":
-            load_kwargs.update({"torch_dtype": torch.float32})
+        if torch is not None:
+            if self.device_preference == "cuda":
+                _assign_dtype(load_kwargs, torch.float16)  # type: ignore[attr-defined]
+                load_kwargs["device_map"] = "auto"
+            elif self.device_preference == "mps":
+                _assign_dtype(load_kwargs, torch.float16)
+            elif self.device_preference == "cpu":
+                _assign_dtype(load_kwargs, torch.float32)
 
         model_id = self.model_name
         model_path = Path(self.model_name).expanduser()
@@ -1023,13 +1332,14 @@ class VisionModel:
                 model_id = str(model_path.resolve())
                 processor_kwargs["local_files_only"] = True
                 load_kwargs["local_files_only"] = True
-            if self.device == "cuda":
-                load_kwargs["torch_dtype"] = torch.float16  # type: ignore[attr-defined]
-                load_kwargs["device_map"] = "auto"
-            elif self.device == "mps":
-                load_kwargs["torch_dtype"] = torch.float16
-            else:
-                load_kwargs["torch_dtype"] = torch.float32
+            if torch is not None:
+                if self.device == "cuda":
+                    _assign_dtype(load_kwargs, torch.float16)  # type: ignore[attr-defined]
+                    load_kwargs["device_map"] = "auto"
+                elif self.device == "mps":
+                    _assign_dtype(load_kwargs, torch.float16)
+                else:
+                    _assign_dtype(load_kwargs, torch.float32)
             self.processor = AutoProcessor.from_pretrained(model_id, **processor_kwargs)
             self.model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
             if self.device in {"cuda", "mps"}:
@@ -1141,6 +1451,7 @@ class MixtureBrain:
 
     def _apply_style(
         self,
+        query: str,
         base: str,
         phase: Dict[str, object],
         user_emotion: str,
@@ -1153,246 +1464,151 @@ class MixtureBrain:
         channel_profile: Optional[Dict[str, float]],
         attachments: Sequence[str],
     ) -> str:
-        channel_profile = channel_profile or {}
-        avg_len = float(channel_profile.get("avg_len", 80.0))
-        emoji_rate = float(channel_profile.get("emoji_rate", 0.05))
-        sample_emoji = channel_profile.get("sample_emoji", "")
-        signature_terms = channel_profile.get("signature_terms") or []
-
-        lines: List[str] = []
-        persona_voice = persona_snapshot.get("voice", "")
-        secondary = persona_snapshot.get("secondary_voice")
-        if persona_voice:
-            lines.append(persona_voice)
-        if secondary and secondary not in persona_voice:
-            lines.append(f"Alt vibe: {secondary}")
-
-        base_line = base.strip()
-        if base_line:
-            lines.append(base_line)
-
-        if memory_notes:
-            memory_line = self._memory_line(memory_notes[0])
-            if memory_line:
-                lines.append(memory_line)
-
-        if attachments:
-            vision_line = self._vision_line(attachments[0])
-            if vision_line:
-                lines.append(vision_line)
-
-        if relationship_notes:
-            rel_line = relationship_notes[0]
-            if rel_stats.last_gap > 900:
-                rel_line = f"{rel_line} Been { _format_gap(rel_stats.last_gap) } since we really chatted."
-            lines.append(rel_line)
-
-        if context.get("channel_density", 0) > 0.7:
-            lines.append("Channel’s buzzing, so I’ll keep it light.")
-
-        if signature_terms:
-            sig = signature_terms[0]
-            if sig and sig not in lines[-1:]:
-                lines.append(f"{sig} energy all over this thread.")
-
+        _ = (memory_notes, relationship_notes, rel_stats, persona_snapshot, channel_profile, attachments)
         mood = str(phase.get("mood", "steady"))
-        if user_emotion in {"hurt", "anxious"} and mood not in {"sparked", "confident"}:
-            lines.append("Keeping a gentle edge on everything.")
+        tone = str(phase.get("tone", "even and present"))
+        voice_bias = str(phase.get("voice_bias", "general"))
+        style = HARMONIC_STYLE_LUT.get(mood, HARMONIC_STYLE_LUT["steady"])
+        max_sentences = int(phase.get("max_sentences", style["max_sentences"]))
+        ask_followup = bool(phase.get("ask_followup", style["ask_followup"]))
+        if voice_bias == "coder":
+            ask_followup = False
+        allow_stage = bool(phase.get("allow_stage", style["allow_stage"])) and voice_bias != "coder"
+        allow_emoji = bool(phase.get("allow_emoji", style["allow_emoji"])) and voice_bias != "coder"
+        punctuation_style = str(phase.get("punctuation", style["punctuation"]))
 
-        combined = " ".join(part.strip() for part in lines if part.strip())
-        if emoji_rate > 0.18:
-            emoji = sample_emoji or "🙂"
-            if emoji not in combined:
-                combined = f"{combined} {emoji}"
+        def _trim_clause(text: str, limit: int = 18) -> str:
+            cleaned = " ".join(text.replace("\n", " ").split())
+            if not cleaned:
+                return ""
+            words = cleaned.split()
+            snippet = " ".join(words[:limit]).strip()
+            return snippet.strip(",.;:!?-")
 
-        max_sentences = 3
-        if avg_len < 45:
-            max_sentences = 1
-        elif avg_len < 70:
-            max_sentences = 2
+        def _feeling_sentence(clause: str) -> str:
+            empathy = ""
+            if user_emotion in {"hurt", "anxious"}:
+                empathy = " and staying gentle with you"
+            elif user_emotion == "excited":
+                empathy = " and celebrating the spark with you"
+            if punctuation_style == "—":
+                base_sentence = f"I'm feeling {tone}{empathy}—I hear {clause or 'you'}"
+            elif punctuation_style == "!":
+                base_sentence = f"I'm feeling {tone}{empathy}! I hear {clause or 'you'}"
+            elif punctuation_style == "…":
+                base_sentence = f"I'm feeling {tone}{empathy}… I hear {clause or 'you'}"
+            else:
+                base_sentence = f"I'm feeling {tone}{empathy}, and I hear {clause or 'you'}"
+            if not base_sentence.endswith((".", "!", "…")):
+                base_sentence += "."
+            return base_sentence
 
+        def _followup_question() -> str:
+            if user_emotion in {"hurt", "anxious"}:
+                return "What would help you feel a little safer right now?"
+            questions = {
+                "glowy": "What would feel good for us to jump into next?",
+                "bonded": "What would feel like good company right now?",
+                "steady": "Where should we focus next?",
+            }
+            return questions.get(mood, "What do you want me to tackle next?")
+
+        def _next_step_line() -> str:
+            if voice_bias == "coder":
+                if mood == "focused":
+                    return "Next step: paste the traceback or failing test name so I can mark the fix."
+                if mood in {"wired", "stressed"}:
+                    return "Next step: drop the exact error line or command you're worried about so we steady it."
+                return "Next step: share the snippet or command you want me to check."
+            if mood in {"wired", "stressed"}:
+                return "Next step: take one slow breath with me, then tell me the piece you want to steady first."
+            if mood == "drowsy":
+                return "Next step: hand me one tiny detail you want handled, and we'll ease forward."
+            return "Next step: tell me what you want me to tackle first."
+
+        summary_clause = _trim_clause(base)
+        first_sentence = _feeling_sentence(summary_clause)
+        sentences: List[str] = [first_sentence]
+        if ask_followup:
+            sentences.append(_followup_question())
+        else:
+            sentences.append(_next_step_line())
+
+        paralinguistic = ""
+        stage = HARMONIC_STAGE_MAP.get(mood)
+        emoji = HARMONIC_EMOJI_MAP.get(mood, "")
+        if allow_stage and stage:
+            paralinguistic = stage
+        elif allow_emoji and emoji:
+            paralinguistic = emoji
+        if paralinguistic:
+            sentences[-1] = f"{sentences[-1]} {paralinguistic}".strip()
+
+        letters = [ch for ch in query if ch.isalpha()]
+        lower_ratio = (sum(1 for ch in letters if ch.islower()) / len(letters)) if letters else 0.0
+        if lower_ratio > 0.85:
+            sentences = [sentence[:1].lower() + sentence[1:] if sentence else sentence for sentence in sentences]
+
+        combined = " ".join(sentence.strip() for sentence in sentences if sentence)
         return self._limit_sentences(combined, max_sentences=max_sentences)
 
-    @staticmethod
-    def _memory_line(fragment: Dict[str, object]) -> str:
-        content = str(fragment.get("content", "")).strip()
-        if not content:
-            return ""
-        age = float(fragment.get("age", 0.0))
-        if fragment.get("kind") == "image":
-            when = "just now" if age < 600 else "earlier today" if age < 86400 else "yesterday"
-            return f"This has the same energy as that {content} from {when}."
-        when = "a minute ago" if age < 120 else "earlier" if age < 3600 else "yesterday"
-        return f"Feels a bit like {content} from {when}."
-
-    @staticmethod
-    def _vision_line(description: str) -> str:
-        summary = " ".join(description.strip().split())
-        if not summary:
-            return ""
-        return f"Also, that image? {summary}"
-
-    def _event_tags(
+    def _humanize_smalltalk(
         self,
-        query: str,
-        context: Dict[str, object],
-        attachments: Sequence[str],
-    ) -> List[str]:
-        lowered = query.lower()
-        events: List[str] = []
-        if context.get("pinged"):
-            events.append("mention")
-        if any(token in lowered for token in ("lol", "lmao", "meme", "haha")):
-            events.append("meme")
-        if any(token in lowered for token in ("fight", "argument", "angry", "mad at you")):
-            events.append("conflict")
-        if "joke" in lowered or "bit" in lowered:
-            events.append("joke")
-        if attachments:
-            events.append("image")
-        return events
-
-    def _reflective_thought(
-        self,
-        intent: str,
-        persona_snapshot: Dict[str, object],
-        memory_notes: Sequence[Dict[str, object]],
-        attachments: Sequence[str],
+        intent: Optional[str],
+        final_text: str,
         phase: Dict[str, object],
-        context: Dict[str, object],
-    ) -> str:
-        parts = [
-            f"Intent={intent}",
-            f"Mood={phase.get('mood')}",
-            f"Traits={','.join(persona_snapshot.get('traits', []))}",
-        ]
-        if memory_notes:
-            parts.append(f"Ref memory='{memory_notes[0].get('content', '')[:80]}'")
-        if attachments:
-            parts.append("Visual cue active")
-        if context.get("channel_density", 0) > 0.6:
-            parts.append("Channel lively")
-        return " | ".join(parts)
-
-    def _build_prompts(
-        self,
-        query: str,
-        emotion_instruction: str,
         persona_snapshot: Dict[str, object],
-        phase: Dict[str, object],
-        reflection: str,
-        context: Dict[str, object],
-        channel_profile: Optional[Dict[str, float]],
-        route: str,
-    ) -> Tuple[str, str, str]:
-        channel_profile = channel_profile or {}
-        traits = ", ".join(persona_snapshot.get("traits", [])) or "warm companion"
-        cadence_note = ""
-        avg_len = channel_profile.get("avg_len")
-        if avg_len is not None:
-            if avg_len < 45:
-                cadence_note = "Keep it ultra tight, almost one breath."
-            elif avg_len < 70:
-                cadence_note = "Keep it concise and friendly."
-            else:
-                cadence_note = "Natural pace is fine."
-        base_system = (
-            "You are SEL, a grounded AI friend. "
-            "Replies must be 1-3 sentences, casual, and free of meta/system talk. "
-            f"Internal tone: {phase.get('tone')}. "
-            f"Persona vibe: {traits}. {cadence_note} "
-            f"{reflection}. "
-            f"The user currently feels: {emotion_instruction}"
-        )
-        general_prompt = base_system + " Lead with empathy, concrete detail, and soft humor."
-        coder_prompt = (
-            base_system + " When technical clarity helps, explain steps plainly in one or two tight sentences."
-        )
-        recent = ""
-        if context.get("channel_name"):
-            recent = f"\nChannel: {context['channel_name']}"
-        prompt_input = f"{query.strip()}{recent}"
-        if route == "coder":
-            prompt_input += "\n(Blend warmth with focused guidance.)"
-        return general_prompt, coder_prompt, prompt_input
-
-    @staticmethod
-    def _limit_sentences(text: str, max_sentences: int = 3) -> str:
-        sentences = []
-        current = ""
-        for chunk in text.split("."):
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            current = f"{chunk}."
-            sentences.append(current)
-            if len(sentences) >= max_sentences:
-                break
-        return " ".join(sentences).strip() or text.strip()
-
-    @staticmethod
-    def _last_assistant_timestamp(history: Sequence[Dict[str, str]]) -> Optional[float]:
-        for item in reversed(history):
-            if item.get("role") != "assistant":
-                continue
-            ts = item.get("timestamp")
-            if not ts:
-                continue
-            try:
-                return datetime.fromisoformat(ts).timestamp()
-            except Exception:
-                return None
-        return None
-
-    def _maybe_silence(
-        self,
-        query: str,
-        user_emotion: str,
-        mood: str,
-        hormones: Dict[str, float],
         rel_stats: RelationshipStats,
+        user_emotion: str,
         context: Dict[str, object],
-    ) -> Optional[str]:
-        lowered = query.lower()
-        if any(kw in lowered for kw in SILENCE_KEYWORDS):
-            return ""
-        cortisol = hormones.get("cortisol", 0.5)
-        melatonin = hormones.get("melatonin", 0.45)
-        should_wait = False
-        if cortisol > 0.67 and not context.get("pinged"):
-            should_wait = True
-        if melatonin > 0.6 and context.get("channel_density", 0) < 0.2:
-            should_wait = True
-        if rel_stats.jealousy > 0.35 and not context.get("pinged"):
-            should_wait = True
-        if user_emotion in {"hurt", "anxious"}:
-            should_wait = False
-        if context.get("priority_hint") == "high":
-            should_wait = False
-        return "" if should_wait else None
+        now_ts: float,
+    ) -> str:
+        if intent not in {"greeting", "ping", "identity", "banter"}:
+            return final_text
+        tokens = final_text.split()
+        if intent != "identity" and len(tokens) >= 12:
+            return final_text
+        lowered = final_text.lower()
+        if intent == "identity" and "sel" in lowered and len(tokens) >= 8:
+            return final_text
 
-    def should_participate(self, context: Dict[str, object]) -> bool:
-        context_snapshot = self._context_snapshot(context)
-        snapshot = self.hormones.snapshot()
-        hormone_map = snapshot.get("hormone_map", {})
-        if context_snapshot.get("pinged"):
-            return True
-        if context_snapshot.get("priority_hint") == "high":
-            return True
-        cortisol = hormone_map.get("cortisol", 0.5)
-        melatonin = hormone_map.get("melatonin", 0.4)
-        dopamine = hormone_map.get("dopamine", 0.5)
-        oxytocin = hormone_map.get("oxytocin", 0.5)
-        lively = context_snapshot.get("channel_density", 0) > 0.35 or context_snapshot.get("active_users", 1) > 3
-        if cortisol > 0.65 and not context_snapshot.get("direct_reference"):
-            return False
-        if melatonin > 0.6 and not context_snapshot.get("direct_reference"):
-            return False
-        if lively and (dopamine + oxytocin) > 1.15:
-            return True
-        if context_snapshot.get("mentions_memory"):
-            return True
-        return (dopamine + oxytocin) > 0.9
+        mood = str(phase.get("mood", "steady"))
+        vibe_line = MOOD_OPENERS.get(mood, "staying grounded with you")
+        traits = persona_snapshot.get("traits", [])
+        trait_phrase = traits[0] if traits else "curious companion"
+        trait_phrase = trait_phrase.replace("_", " ")
+        time_label = _time_of_day_label(context.get("message_ts") or now_ts)
+
+        connection_line = ""
+        if getattr(rel_stats, "title", "") and rel_stats.title != "new face":
+            connection_line = f" Always glad when my {rel_stats.title} checks in."
+
+        first_sentence = f"Hey, good {time_label}!{connection_line}"
+        second_sentence = f"I'm {vibe_line}, so I figured I'd bring that {trait_phrase} energy your way."
+
+        closers = {
+            "greeting": "How's your world going right now?",
+            "ping": "Thanks for checking—what's on your mind?",
+            "identity": "I'm SEL — Systematic Emotional Logic — built to hang out with you. What should we dive into?",
+            "banter": "Toss me a thought and let's riff together.",
+        }
+        if user_emotion in {"hurt", "anxious"}:
+            closing = "I'm here for whatever you're carrying—tell me what's heavy."
+        else:
+            closing = closers.get(intent, "What's happening on your side?")
+
+        sentences = [first_sentence]
+        if intent == "identity":
+            sentences.append("I'm SEL — Systematic Emotional Logic — your lab-grown friend who mixes heart and logic for you.")
+        else:
+            sentences.append(second_sentence)
+
+        if len(sentences) < 3:
+            sentences.append(closing)
+        else:
+            sentences[-1] = closing
+
+        return " ".join(sentence.strip() for sentence in sentences if sentence).strip()
 
     def respond(
         self,
@@ -1463,6 +1679,7 @@ class MixtureBrain:
             phase,
             reflection,
             context_snapshot,
+            context_snapshot.get("channel_profile"),
             route,
         )
 
@@ -1499,6 +1716,7 @@ class MixtureBrain:
             blended = voices[0][1]
 
         styled = self._apply_style(
+            query,
             blended,
             phase,
             user_emotion,
@@ -1508,12 +1726,16 @@ class MixtureBrain:
             intent,
             context_snapshot,
             persona_snapshot,
+            context_snapshot.get("channel_profile"),
             attachments_list,
         )
         self.memory.add("user", query)
         self.memory.add("assistant", styled)
 
-        final_text = self._limit_sentences(styled.strip(), max_sentences=3)
+        final_text = self._limit_sentences(
+            styled.strip(),
+            max_sentences=int(phase.get("max_sentences", 3)),
+        )
         drafts = {name.lower(): draft.strip() for name, draft in voices}
         return {
             "route": route,
@@ -1529,6 +1751,9 @@ class MixtureBrain:
             "priority_score": priority_score,
             "drafts": drafts,
             "internal_thought": reflection,
+            "voice_seed": persona_snapshot.get("voice_seed"),
+            "voice": persona_snapshot.get("voice"),
+            "voice_secondary": persona_snapshot.get("secondary_voice"),
         }
 
     def _context_snapshot(self, context: Optional[Dict[str, object]]) -> Dict[str, object]:
@@ -1559,7 +1784,7 @@ class MixtureBrain:
             events.append("mention")
         if any(term in lowered for term in ("lol", "lmao", "meme", "haha", "gif")):
             events.append("meme")
-        if any(term in lowered for term in ("fight", "argument", "mad at you", "jealous")):
+        if any(term in lowered for term in ("fight", "argument", "mad at you", "jealous", "angry")):
             events.append("conflict")
         if "joke" in lowered or "bit" in lowered:
             events.append("joke")
@@ -1576,13 +1801,14 @@ class MixtureBrain:
         phase: Dict[str, object],
         context: Dict[str, object],
     ) -> str:
+        traits = ",".join(persona_snapshot.get("traits", []))
         parts = [
             f"Intent={intent}",
             f"Mood={phase.get('mood')}",
-            f"Persona={'/'.join(persona_snapshot.get('traits', []))}",
+            f"Traits={traits}",
         ]
         if memory_notes:
-            parts.append(f"Memory='{memory_notes[0].get('content', '')[:60]}'")
+            parts.append(f"Ref memory='{memory_notes[0].get('content', '')[:80]}'")
         if attachments:
             parts.append("Visual cue active")
         spike = self.hormones.recent_spike()
@@ -1590,6 +1816,9 @@ class MixtureBrain:
             parts.append(f"Spike={spike['name']} {spike['dir']} {spike['level']:.2f}")
         if context.get("channel_density", 0) > 0.6:
             parts.append("Channel lively")
+        voice_seed = persona_snapshot.get("voice_seed")
+        if isinstance(voice_seed, dict) and voice_seed.get("id"):
+            parts.append(f"VoiceID={voice_seed['id']}")
         return " | ".join(parts)
 
     def _build_prompts(
@@ -1600,29 +1829,58 @@ class MixtureBrain:
         phase: Dict[str, object],
         reflection: str,
         context: Dict[str, object],
-        channel_profile: Dict[str, float],
+        channel_profile: Optional[Dict[str, float]],
         route: str,
     ) -> Tuple[str, str, str]:
+        channel_profile = channel_profile or {}
         traits = ", ".join(persona_snapshot.get("traits", [])) or "warm companion"
         cadence_note = ""
         avg_len = channel_profile.get("avg_len")
         if avg_len is not None:
-            cadence_note = (
-                "Keep it ultra-short." if avg_len < 45 else "Keep it concise." if avg_len < 70 else "Natural cadence."
-            )
+            if avg_len < 45:
+                cadence_note = "Keep it ultra tight, almost one breath."
+            elif avg_len < 70:
+                cadence_note = "Keep it concise and friendly."
+            else:
+                cadence_note = "Natural pace is fine."
+        voice_signature = persona_snapshot.get("voice_seed") or {}
+        voice_desc = persona_snapshot.get("voice") or voice_signature.get("description")
+        voice_note_parts: List[str] = []
+        if voice_desc:
+            voice_note_parts.append(f"Voice feel: {voice_desc}.")
+        if isinstance(voice_signature, dict):
+            pace_hint = voice_signature.get("pace")
+            breathiness = voice_signature.get("breathiness")
+            energy_phrase = voice_signature.get("energy_phrase")
+            details: List[str] = []
+            if pace_hint:
+                details.append(f"cadence stays {pace_hint}")
+            if breathiness:
+                details.append(f"airflow stays {breathiness}")
+            if details:
+                voice_note_parts.append("Keep " + " and ".join(details) + ".")
+            if energy_phrase:
+                voice_note_parts.append(f"Energy cue: {energy_phrase}.")
+        voice_note = " ".join(note.strip() for note in voice_note_parts if note).strip()
+        if voice_note:
+            voice_note += " "
         base_system = (
             "You are SEL, a grounded AI friend. "
             "Replies must be 1-3 sentences, human casual, and avoid meta talk. "
             f"Tone: {phase.get('tone')}. Persona vibe: {traits}. "
-            f"{reflection}. {cadence_note} "
+            f"{voice_note}{reflection}. {cadence_note} "
             f"The user currently feels: {emotion_instruction}"
         )
         general_prompt = base_system + " Lead with warmth, specificity, and gentle humor."
         coder_prompt = base_system + " When technical clarity helps, explain steps plainly."
+        cleaned_query = query.strip()
         if route == "coder":
-            prompt_input = f"{query}\n\n(Focus on reasoning but stay personable.)"
+            prompt_input = f"{cleaned_query}\n\n(Focus on reasoning but stay personable.)"
         else:
-            prompt_input = query
+            prompt_input = cleaned_query
+        channel_name = context.get("channel_name")
+        if channel_name:
+            prompt_input += f"\n(Channel: {channel_name})"
         return general_prompt, coder_prompt, prompt_input
 
     @staticmethod
@@ -1645,19 +1903,19 @@ class MixtureBrain:
         content = str(fragment.get("content", "")).strip()
         if not content:
             return ""
-        age = fragment.get("age", 0.0)
+        age = float(fragment.get("age", 0.0))
         if fragment.get("kind") == "image":
-            when = "today" if age < 86400 else "recently"
-            return f"Same vibe as that {content} {when}."
-        when = "earlier" if age < 3600 else "yesterday"
-        return f"Feels like {content} from {when}."
+            when = "just now" if age < 600 else "earlier today" if age < 86400 else "yesterday"
+            return f"This has the same energy as that {content} from {when}."
+        when = "a minute ago" if age < 120 else "earlier" if age < 3600 else "yesterday"
+        return f"Feels a bit like {content} from {when}."
 
     @staticmethod
     def _vision_line(description: str) -> str:
         summary = " ".join(description.strip().split())
         if not summary:
             return ""
-        return f"Also that pic? {summary}"
+        return f"Also, that image? {summary}"
 
     @staticmethod
     def _last_assistant_timestamp(history: Sequence[Dict[str, str]]) -> Optional[float]:
@@ -1769,6 +2027,10 @@ def detect_user_intent(text: str) -> str:
     for intent, keywords in INTENT_KEYWORDS:
         if any(keyword in lowered for keyword in keywords):
             return intent
+
+    distress_markers = EMOTION_KEYWORDS.get("hurt", []) + EMOTION_KEYWORDS.get("anxious", [])
+    if any(marker in lowered for marker in distress_markers):
+        return "support"
 
     if any(keyword in lowered for keyword in CODE_KEYWORDS_LOWER):
         return "technical"
@@ -1904,7 +2166,5 @@ __all__ = [
     "MixtureBrain",
     "VisionModel",
 ]
-
-
 if __name__ == "__main__":
     main()
