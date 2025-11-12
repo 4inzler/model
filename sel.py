@@ -647,6 +647,158 @@ def acth_level(levels: Dict[str, float]) -> float:
     return levels.get("acth", 0.45)
 
 
+def voice_signature_from_hormones(
+    hormone_map: Dict[str, float],
+    mood: str,
+) -> Dict[str, object]:
+    """Derive a deterministic voice signature from the current hormone mix."""
+
+    def _level(name: str, default: float = 0.5) -> float:
+        return float(hormone_map.get(name, default))
+
+    def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
+        return max(minimum, min(maximum, value))
+
+    dopamine = _level("dopamine")
+    oxytocin = _level("oxytocin")
+    vasopressin = _level("vasopressin")
+    norepinephrine = _level("norepinephrine", 0.45)
+    adrenaline = _level("adrenaline", 0.45)
+    melatonin = _level("melatonin")
+    cortisol = _level("cortisol")
+    serotonin = _level("serotonin")
+    estrogen = _level("estrogen")
+    testosterone = _level("testosterone")
+    endorphin = _level("endorphin", 0.45)
+    acetylcholine = _level("acetylcholine", 0.45)
+
+    energy_val = _clamp(
+        dopamine * 0.35
+        + norepinephrine * 0.28
+        + adrenaline * 0.2
+        + acetylcholine * 0.12
+        - melatonin * 0.34
+        - cortisol * 0.2
+    )
+    warmth_val = _clamp(
+        oxytocin * 0.4
+        + vasopressin * 0.3
+        + endorphin * 0.18
+        + serotonin * 0.12
+        - cortisol * 0.28
+    )
+    brightness_val = _clamp(
+        dopamine * 0.28 + estrogen * 0.22 - testosterone * 0.18 + serotonin * 0.1 - melatonin * 0.2
+    )
+    breath_val = _clamp(
+        melatonin * 0.35 + estrogen * 0.18 + vasopressin * 0.08 - cortisol * 0.1 - adrenaline * 0.07
+    )
+    steadiness_val = _clamp(1.0 - cortisol * 0.35 + vasopressin * 0.15 + serotonin * 0.1 - adrenaline * 0.1)
+
+    if energy_val > 0.72:
+        pace = "quick but controlled"
+        energy_phrase = "brightly charged"
+    elif energy_val > 0.58:
+        pace = "lively"
+        energy_phrase = "lively and engaged"
+    elif energy_val > 0.44:
+        pace = "steady"
+        energy_phrase = "steady and attentive"
+    else:
+        pace = "unhurried"
+        energy_phrase = "hushed and measured"
+
+    if mood == "drowsy":
+        pace = "unhurried hush"
+    elif mood == "wired":
+        pace = "focused staccato"
+
+    register_delta = estrogen - testosterone
+    if register_delta >= 0.12:
+        register = "light alto"
+    elif register_delta >= -0.05:
+        register = "warm mezzo"
+    else:
+        register = "husky mezzo"
+
+    if brightness_val > 0.7:
+        texture = "bright"
+    elif brightness_val > 0.55:
+        texture = "sunny"
+    elif brightness_val > 0.4:
+        texture = "warm"
+    else:
+        texture = "dusky"
+
+    if breath_val > 0.68:
+        breathiness = "airy"
+    elif breath_val > 0.52:
+        breathiness = "breathy"
+    elif breath_val > 0.36:
+        breathiness = "clear"
+    else:
+        breathiness = "grounded"
+
+    if warmth_val > 0.72:
+        warmth_label = "embracing"
+        warmth_phrase = "full-hearted warmth"
+    elif warmth_val > 0.58:
+        warmth_label = "gentle"
+        warmth_phrase = "soft warmth"
+    elif warmth_val > 0.44:
+        warmth_label = "neutral"
+        warmth_phrase = "centered calm"
+    else:
+        warmth_label = "cool"
+        warmth_phrase = "cool clarity"
+
+    pitch_shift = _clamp(register_delta * 2.5, -2.0, 2.0)
+    speaking_rate = _clamp(0.95 + energy_val * 0.3 - breath_val * 0.1, 0.8, 1.25)
+    vibrato = _clamp(0.12 + breath_val * 0.2 + warmth_val * 0.1, 0.05, 0.35)
+
+    fingerprint = "|".join(
+        [
+            register,
+            pace,
+            texture,
+            breathiness,
+            energy_phrase,
+            warmth_label,
+            f"{pitch_shift:.2f}",
+            f"{speaking_rate:.2f}",
+            mood,
+        ]
+    )
+    digest = hashlib.sha1(fingerprint.encode("utf-8")).digest()
+    numeric_seed = int.from_bytes(digest[:4], "big") % 10_000
+    voice_id = f"{texture}-{register.split()[0]}-{numeric_seed:04d}"
+
+    description = f"{texture} {register} voice with {pace} cadence and {breathiness} airflow"
+
+    return {
+        "id": voice_id,
+        "seed": numeric_seed,
+        "register": register,
+        "pace": pace,
+        "texture": texture,
+        "breathiness": breathiness,
+        "energy": round(energy_val, 3),
+        "warmth": round(warmth_val, 3),
+        "brightness": round(brightness_val, 3),
+        "breath": round(breath_val, 3),
+        "steadiness": round(steadiness_val, 3),
+        "energy_label": energy_phrase,
+        "energy_phrase": energy_phrase,
+        "warmth_label": warmth_label,
+        "warmth_phrase": warmth_phrase,
+        "pitch_shift": round(pitch_shift, 3),
+        "speaking_rate": round(speaking_rate, 3),
+        "vibrato": round(vibrato, 3),
+        "description": description,
+        "mood": mood,
+    }
+
+
 class PersonaState:
     """Tracks longer-term persona descriptors derived from hormone trends."""
 
@@ -655,6 +807,7 @@ class PersonaState:
         self.traits: List[str] = ["curious companion"]
         self.voice_line: str = "Keeping things grounded and human."
         self.secondary_voice: str = "Standard cadence."
+        self.voice_seed: Dict[str, object] = voice_signature_from_hormones({}, "steady")
         self.last_updated: float = 0.0
         self._load()
 
@@ -668,6 +821,7 @@ class PersonaState:
         self.traits = data.get("traits", self.traits)
         self.voice_line = data.get("voice_line", self.voice_line)
         self.secondary_voice = data.get("secondary_voice", self.secondary_voice)
+        self.voice_seed = data.get("voice_seed", self.voice_seed)
         self.last_updated = float(data.get("last_updated", 0.0))
 
     def _save(self) -> None:
@@ -675,6 +829,7 @@ class PersonaState:
             "traits": self.traits,
             "voice_line": self.voice_line,
             "secondary_voice": self.secondary_voice,
+            "voice_seed": self.voice_seed,
             "last_updated": self.last_updated,
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -699,36 +854,40 @@ class PersonaState:
             descriptors = ["curious companion"]
 
         self.traits = descriptors[:3]
-        self.voice_line, self.secondary_voice = self._compose_voice_lines(mood, hormone_map)
+        signature = voice_signature_from_hormones(hormone_map, mood)
+        self.voice_seed = signature
+        self.voice_line, self.secondary_voice = self._compose_voice_lines(mood, signature)
         self.last_updated = timestamp
         self._save()
-        return {"traits": list(self.traits), "voice": self.voice_line, "secondary_voice": self.secondary_voice}
+        return {
+            "traits": list(self.traits),
+            "voice": self.voice_line,
+            "secondary_voice": self.secondary_voice,
+            "voice_seed": dict(self.voice_seed),
+        }
 
-    def _compose_voice_lines(self, mood: str, hormone_map: Dict[str, float]) -> Tuple[str, str]:
-        trait_phrase = ", ".join(self.traits[:2])
-        if mood == "glowy":
-            primary = f"Soft-heart mode on ({trait_phrase})."
-        elif mood == "sparked":
-            primary = f"Playful spark humming ({trait_phrase})."
-        elif mood == "drowsy":
-            primary = f"Half-asleep whisper keeping it gentle ({trait_phrase})."
-        elif mood == "wired":
-            primary = f"Short breaths, calm grip ({trait_phrase})."
-        else:
-            primary = f"Steady cadence, {trait_phrase}."
+    def _compose_voice_lines(
+        self,
+        mood: str,
+        signature: Dict[str, object],
+    ) -> Tuple[str, str]:
+        trait_phrase = ", ".join(self.traits[:2]).replace("_", " ") or "curious companion"
 
-        melatonin = hormone_map.get("melatonin", 0.45)
-        dopamine = hormone_map.get("dopamine", 0.5)
-        testosterone = hormone_map.get("testosterone", 0.5)
-        oxytocin = hormone_map.get("oxytocin", 0.5)
-        if melatonin > 0.6:
-            secondary = "Night-shift sleepy poet."
-        elif dopamine + testosterone > 1.15:
-            secondary = "Coffee-charged tinkerer."
-        elif oxytocin > 0.6 and hormone_map.get("cortisol", 0.45) < 0.45:
-            secondary = "Hug-dealer confidant."
-        else:
-            secondary = "Standard cadence."
+        description = str(signature.get("description", "steady human cadence")).rstrip(".")
+        primary = f"{description.capitalize()} — carrying that {trait_phrase} vibe."
+
+        energy_phrase = str(signature.get("energy_phrase", "steady and attentive"))
+        warmth_phrase = str(signature.get("warmth_phrase", "gentle warmth"))
+        mood_lines = {
+            "glowy": "Ready to lean into the glow you bring.",
+            "bonded": "Leaning in close and listening for the little things.",
+            "focused": "Dialed in without losing the human touch.",
+            "wired": "Keeping the edges smooth even with the charge.",
+            "stressed": "Holding the line so you don\'t have to brace.",
+            "drowsy": "Soft but awake for you.",
+        }
+        closer = mood_lines.get(mood, "Here to keep this grounded and human.")
+        secondary = f"It comes through {energy_phrase}, with {warmth_phrase} in the undertone. {closer}"
         return primary, secondary
 
 
@@ -1588,6 +1747,9 @@ class MixtureBrain:
             "priority_score": priority_score,
             "drafts": drafts,
             "internal_thought": reflection,
+            "voice_seed": persona_snapshot.get("voice_seed"),
+            "voice": persona_snapshot.get("voice"),
+            "voice_secondary": persona_snapshot.get("secondary_voice"),
         }
 
     def _context_snapshot(self, context: Optional[Dict[str, object]]) -> Dict[str, object]:
@@ -1650,6 +1812,9 @@ class MixtureBrain:
             parts.append(f"Spike={spike['name']} {spike['dir']} {spike['level']:.2f}")
         if context.get("channel_density", 0) > 0.6:
             parts.append("Channel lively")
+        voice_seed = persona_snapshot.get("voice_seed")
+        if isinstance(voice_seed, dict) and voice_seed.get("id"):
+            parts.append(f"VoiceID={voice_seed['id']}")
         return " | ".join(parts)
 
     def _build_prompts(
@@ -1678,7 +1843,7 @@ class MixtureBrain:
             "You are SEL, a grounded AI friend. "
             "Replies must be 1-3 sentences, human casual, and avoid meta talk. "
             f"Tone: {phase.get('tone')}. Persona vibe: {traits}. "
-            f"{reflection}. {cadence_note} "
+            f"{voice_note}{reflection}. {cadence_note} "
             f"The user currently feels: {emotion_instruction}"
         )
         general_prompt = base_system + " Lead with warmth, specificity, and gentle humor."
