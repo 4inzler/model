@@ -10,7 +10,6 @@ either as a CLI companion or inside the Discord bridge.
 
 from __future__ import annotations
 
-import hashlib
 import inspect
 import io
 import json
@@ -606,8 +605,6 @@ class HormoneSystem:
             style_defaults["allow_stage"] = False
             style_defaults["allow_emoji"] = False
 
-        voice_signature = voice_signature_from_hormones(levels, mood)
-
         self.state = {
             "mood": mood,
             "tone": tone,
@@ -624,7 +621,6 @@ class HormoneSystem:
             "punctuation": style_defaults["punctuation"],
             "cadence": style_defaults["cadence"],
             "temperature_hint": round(general_temp, 2),
-            "voice_seed": voice_signature,
         }
         self._save()
         return dict(self.state)
@@ -1843,27 +1839,6 @@ class MixtureBrain:
                 cadence_note = "Keep it concise and friendly."
             else:
                 cadence_note = "Natural pace is fine."
-        voice_signature = persona_snapshot.get("voice_seed") or {}
-        voice_desc = persona_snapshot.get("voice") or voice_signature.get("description")
-        voice_note_parts: List[str] = []
-        if voice_desc:
-            voice_note_parts.append(f"Voice feel: {voice_desc}.")
-        if isinstance(voice_signature, dict):
-            pace_hint = voice_signature.get("pace")
-            breathiness = voice_signature.get("breathiness")
-            energy_phrase = voice_signature.get("energy_phrase")
-            details: List[str] = []
-            if pace_hint:
-                details.append(f"cadence stays {pace_hint}")
-            if breathiness:
-                details.append(f"airflow stays {breathiness}")
-            if details:
-                voice_note_parts.append("Keep " + " and ".join(details) + ".")
-            if energy_phrase:
-                voice_note_parts.append(f"Energy cue: {energy_phrase}.")
-        voice_note = " ".join(note.strip() for note in voice_note_parts if note).strip()
-        if voice_note:
-            voice_note += " "
         base_system = (
             "You are SEL, a grounded AI friend. "
             "Replies must be 1-3 sentences, human casual, and avoid meta talk. "
